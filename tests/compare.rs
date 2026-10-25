@@ -59,6 +59,13 @@ fn matches_gnu_du() {
         ("missing operand", &["nope", "a"]),
         ("bad option", &["-q"]),
         ("bad depth", &["-d", "x"]),
+        ("summarize", &["-s", "a", "c"]),
+        ("summarize kilobytes", &["-sk", "."]),
+        ("summarize human", &["--summarize", "-h", "."]),
+        ("summarize with depth zero", &["-s", "-d0", "a"]),
+        ("summarize conflicts with depth", &["-d1", "-s", "a"]),
+        ("k overrides h", &["-h", "-k", "a"]),
+        ("h overrides k", &["-k", "-h", "a"]),
     ];
     for (name, args) in cases {
         let want = run("du", &root, args);

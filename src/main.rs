@@ -28,6 +28,9 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    for w in &args.warnings {
+        eprintln!("du: {w}");
+    }
     match run(args) {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::FAILURE,
