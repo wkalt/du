@@ -1,6 +1,7 @@
 //! Command-line parsing for the supported subset of GNU du:
-//! -h/--human-readable, -k, -d/--max-depth and -s/--summarize, with
-//! getopt-style clustering (`-hd1`) and operands allowed anywhere.
+//! -h/--human-readable, -k, -d/--max-depth, -s/--summarize and
+//! -x/--one-file-system, with getopt-style clustering (`-hd1`) and
+//! operands allowed anywhere.
 
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
@@ -10,6 +11,7 @@ pub struct Args {
     pub human: bool,
     pub max_depth: Option<usize>,
     pub summarize: bool,
+    pub one_file_system: bool,
     pub paths: Vec<Vec<u8>>,
     /// Non-fatal diagnostics to print before running.
     pub warnings: Vec<String>,
@@ -69,6 +71,11 @@ fn parse_long(opt: &[u8], rest: &mut impl Iterator<Item = Vec<u8>>, args: &mut A
             args.summarize = true;
             Ok(())
         }
+        b"one-file-system" if value.is_some() => Err("option '--one-file-system' doesn't allow an argument".into()),
+        b"one-file-system" => {
+            args.one_file_system = true;
+            Ok(())
+        }
         b"max-depth" => {
             let value = value.or_else(|| rest.next()).ok_or("option '--max-depth' requires an argument")?;
             args.max_depth = Some(parse_depth(&value)?);
@@ -85,6 +92,7 @@ fn parse_short(opts: &[u8], rest: &mut impl Iterator<Item = Vec<u8>>, args: &mut
             // -h and -k both pick the unit; the last one wins.
             b'k' => args.human = false,
             b's' => args.summarize = true,
+            b'x' => args.one_file_system = true,
             b'd' => {
                 let attached = &opts[i + 1..];
                 let value = match attached.is_empty() {
@@ -124,6 +132,10 @@ mod tests {
         Args { summarize: true, ..want(human, Some(0), paths) }
     }
 
+    fn one_fs(args: Args) -> Args {
+        Args { one_file_system: true, ..args }
+    }
+
     #[test]
     fn parses_valid_args() {
         let cases: &[(&str, &[&str], Args)] = &[
@@ -146,6 +158,9 @@ mod tests {
             ("kilobytes is the default unit", &["-sk"], summarized(false, &["."])),
             ("k after h wins", &["-h", "-k"], want(false, None, &["."])),
             ("h after k wins", &["-kh"], want(true, None, &["."])),
+            ("one file system short", &["-x", "a"], one_fs(want(false, None, &["a"]))),
+            ("one file system long", &["--one-file-system"], one_fs(want(false, None, &["."]))),
+            ("one file system clustered", &["-xsh"], one_fs(summarized(true, &["."]))),
         ];
         for (name, argv, expected) in cases {
             assert_eq!(parse_strs(argv).as_ref(), Ok(expected), "{name}");
@@ -155,13 +170,14 @@ mod tests {
     #[test]
     fn rejects_invalid_args() {
         let cases: &[(&str, &[&str], &str)] = &[
-            ("unknown short", &["-x"], "invalid option -- 'x'"),
+            ("unknown short", &["-q"], "invalid option -- 'q'"),
             ("unknown long", &["--apparent-size"], "unrecognized option '--apparent-size'"),
             ("missing depth", &["-d"], "option requires an argument -- 'd'"),
             ("missing long depth", &["--max-depth"], "option '--max-depth' requires an argument"),
             ("negative depth", &["-d", "-1"], "invalid maximum depth '-1'"),
             ("non-numeric depth", &["--max-depth=x"], "invalid maximum depth 'x'"),
             ("human with value", &["--human-readable=1"], "option '--human-readable' doesn't allow an argument"),
+            ("one file system with value", &["--one-file-system=1"], "option '--one-file-system' doesn't allow an argument"),
             ("summarize with depth", &["-s", "-d1"], "warning: summarizing conflicts with --max-depth=1"),
             ("depth before summarize", &["-d2", "-s"], "warning: summarizing conflicts with --max-depth=2"),
         ];

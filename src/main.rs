@@ -54,7 +54,7 @@ fn run(args: Args) -> io::Result<bool> {
         false => HashSet::new(),
     };
 
-    let scanner = Arc::new(Scanner::new(tracked, max_depth));
+    let scanner = Arc::new(Scanner::new(tracked, max_depth, args.one_file_system));
     let roots: Vec<Root> = stats
         .into_iter()
         .map(|(stat, path)| match stat {

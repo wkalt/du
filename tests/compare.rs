@@ -65,6 +65,15 @@ fn run(bin: &str, dir: &Path, args: &[&str]) -> Output {
     Command::new(bin).args(args).current_dir(dir).env("LC_ALL", "C").output().unwrap()
 }
 
+/// Runs both implementations in `dir` and compares everything they produce.
+fn assert_same(name: &str, dir: &Path, args: &[&str]) {
+    let want = run("du", dir, args);
+    let got = run(env!("CARGO_BIN_EXE_du"), dir, args);
+    assert_eq!(String::from_utf8_lossy(&got.stdout), String::from_utf8_lossy(&want.stdout), "stdout: {name}");
+    assert_eq!(String::from_utf8_lossy(&got.stderr), String::from_utf8_lossy(&want.stderr), "stderr: {name}");
+    assert_eq!(got.status.code(), want.status.code(), "exit code: {name}");
+}
+
 #[test]
 fn matches_gnu_du() {
     if !gnu_du_available() {
@@ -106,16 +115,35 @@ fn matches_gnu_du() {
         ("link into chunked dir, file first", &["a", "many"]),
     ];
     for (name, args) in cases {
-        let want = run("du", &root, args);
-        let got = run(env!("CARGO_BIN_EXE_du"), &root, args);
-        assert_eq!(String::from_utf8_lossy(&got.stdout), String::from_utf8_lossy(&want.stdout), "stdout: {name}");
-        assert_eq!(String::from_utf8_lossy(&got.stderr), String::from_utf8_lossy(&want.stderr), "stderr: {name}");
-        assert_eq!(got.status.code(), want.status.code(), "exit code: {name}");
+        assert_same(name, &root, args);
     }
     for locked in ["locked", "many/locked"] {
         fs::set_permissions(root.join(locked), fs::Permissions::from_mode(0o755)).unwrap();
     }
     fs::remove_dir_all(&root).unwrap();
+}
+
+/// /dev carries mount points (pts, shm, ...) on any Linux system, so it
+/// exercises -x without privileges to mount anything.
+#[test]
+fn matches_gnu_du_one_file_system() {
+    if !gnu_du_available() {
+        eprintln!("skipping: GNU du not found");
+        return;
+    }
+    let root = Path::new("/");
+    let with = run("du", root, &["-x", "/dev"]);
+    let without = run("du", root, &["/dev"]);
+    assert_ne!(with.stdout, without.stdout, "no mount point under /dev, so -x is not exercised");
+    let cases: &[(&str, &[&str])] = &[
+        ("skips mount points", &["-x", "/dev"]),
+        ("long option", &["--one-file-system", "-s", "/dev"]),
+        ("mount point as operand is kept", &["-x", "/dev", "/dev/shm"]),
+        ("clustered", &["-xhd1", "/dev"]),
+    ];
+    for (name, args) in cases {
+        assert_same(name, root, args);
+    }
 }
 
 #[test]

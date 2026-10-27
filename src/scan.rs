@@ -123,12 +123,15 @@ pub struct Scanner {
     /// also named on the command line.
     tracked: HashSet<Key>,
     max_depth: usize,
+    /// -x: skip entries on a different file system than their parent.
+    one_file_system: bool,
     tree: Tree,
 }
 
 impl Scanner {
-    pub fn new(tracked: HashSet<Key>, max_depth: usize) -> Scanner {
-        Scanner { queue: Queue::new(), next_id: AtomicUsize::new(0), tracked, max_depth, tree: Tree::new() }
+    pub fn new(tracked: HashSet<Key>, max_depth: usize, one_file_system: bool) -> Scanner {
+        let (queue, next_id, tree) = (Queue::new(), AtomicUsize::new(0), Tree::new());
+        Scanner { queue, next_id, tracked, max_depth, one_file_system, tree }
     }
 
     pub fn add_root(&self, path: Vec<u8>, stat: Stat) -> usize {
@@ -280,6 +283,13 @@ impl Scanner {
                 return;
             }
         };
+        // GNU du neither counts nor enters a mount point under -x, and
+        // the parent's device is the operand's, since that is the only
+        // way the parent was entered. A mount point named as an operand
+        // is never skipped.
+        if self.one_file_system && stat.key.0 != dir.key.0 {
+            return;
+        }
         if stat.is_dir {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             self.tree.create(id, Some(parent));
