@@ -1,12 +1,14 @@
-//! Serial pass over the scanned tree: sums sizes post-order, de-duplicates
-//! in GNU traversal order, and prints lines and errors.
+//! Serial pass over the scanned tree: walks the parts of it that are
+//! printed or whose size depends on traversal order (hard links, errors),
+//! de-duplicates in GNU order, and prints lines and errors. Everything
+//! else was summed during the scan.
 
 use std::collections::HashSet;
 use std::io::{self, Write};
 
 use crate::human;
 use crate::sys::Key;
-use crate::tree::{Dir, Item, Root, ScanError};
+use crate::tree::{Item, Root, ScanError, Tree};
 
 pub struct Options {
     pub human: bool,
@@ -18,7 +20,7 @@ pub struct Options {
 }
 
 pub struct Report<'a, W: Write> {
-    tree: &'a [Dir],
+    tree: &'a Tree,
     opts: Options,
     seen: HashSet<Key>,
     out: W,
@@ -32,7 +34,7 @@ struct Frame {
 }
 
 impl<'a, W: Write> Report<'a, W> {
-    pub fn new(tree: &'a [Dir], opts: Options, out: W) -> Report<'a, W> {
+    pub fn new(tree: &'a Tree, opts: Options, out: W) -> Report<'a, W> {
         Report { tree, opts, seen: HashSet::new(), out, failed: false }
     }
 
@@ -61,7 +63,8 @@ impl<'a, W: Write> Report<'a, W> {
     }
 
     /// Post-order walk with an explicit stack, so deep trees cannot
-    /// overflow the call stack.
+    /// overflow the call stack. Subtrees that are neither printed nor
+    /// order-dependent are not entered; the scan already summed them.
     fn walk(&mut self, root: usize) -> io::Result<()> {
         let tree = self.tree;
         let mut stack = vec![Frame { id: root, next: 0, total: tree[root].bytes }];
@@ -80,8 +83,11 @@ impl<'a, W: Write> Report<'a, W> {
             top.next += 1;
             match item {
                 Item::Dir(id) => {
-                    if self.first_visit(tree[*id].key, self.opts.dedup_all) {
-                        stack.push(Frame { id: *id, next: 0, total: tree[*id].bytes });
+                    let child = &tree[*id];
+                    if !self.opts.dedup_all && child.depth > self.opts.max_depth && !tree.ordered(*id) {
+                        top.total += tree.total(*id);
+                    } else if self.first_visit(child.key, self.opts.dedup_all) {
+                        stack.push(Frame { id: *id, next: 0, total: child.bytes });
                     }
                 }
                 Item::Link { key, bytes } => {

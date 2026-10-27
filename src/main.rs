@@ -10,6 +10,7 @@ use std::collections::HashSet;
 use std::ffi::CString;
 use std::io::{self, BufWriter};
 use std::process::ExitCode;
+use std::sync::Arc;
 use std::thread;
 
 use args::Args;
@@ -53,7 +54,7 @@ fn run(args: Args) -> io::Result<bool> {
         false => HashSet::new(),
     };
 
-    let scanner = Scanner::new(tracked, max_depth);
+    let scanner = Arc::new(Scanner::new(tracked, max_depth));
     let roots: Vec<Root> = stats
         .into_iter()
         .map(|(stat, path)| match stat {
@@ -64,14 +65,18 @@ fn run(args: Args) -> io::Result<bool> {
         .collect();
 
     let threads = thread::available_parallelism().map_or(4, |n| n.get());
-    let tree = scanner.run(threads);
+    scanner.run(threads);
 
     let out = BufWriter::with_capacity(64 * 1024, io::stdout().lock());
-    let mut report = Report::new(&tree, Options { human: args.human, max_depth, dedup_all }, out);
+    let mut report = Report::new(scanner.tree(), Options { human: args.human, max_depth, dedup_all }, out);
     for root in &roots {
         report.root(root)?;
     }
-    report.finish()
+    let result = report.finish();
+    // The process exits right after this; freeing hundreds of thousands of
+    // records would only delay it.
+    std::mem::forget(scanner);
+    result
 }
 
 fn lstat(path: &[u8]) -> io::Result<sys::Stat> {

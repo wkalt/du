@@ -57,6 +57,15 @@ pub fn open_dir(path: &CStr) -> io::Result<OwnedFd> {
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
+/// Gives the calling thread a private file descriptor table. Threads that
+/// share one contend on its spinlock in every open and close, and every
+/// fstatat and getdents64 on a shared table must also take and drop a
+/// reference on the file. Each worker only ever has one directory open,
+/// so nothing is lost. Failure (e.g. under seccomp) just keeps sharing.
+pub fn unshare_fd_table() {
+    unsafe { libc::unshare(libc::CLONE_FILES) };
+}
+
 /// Mirrors gnulib fts's dirent_inode_sort_may_be_useful: GNU du sorts large
 /// directories by inode except on these file systems, and we must do the
 /// same to reproduce its output order.
@@ -97,6 +106,10 @@ pub struct DirStream<'a> {
 impl<'a> DirStream<'a> {
     pub fn new(fd: BorrowedFd<'a>, buf: &'a mut [u8]) -> DirStream<'a> {
         DirStream { fd, buf, len: 0, off: 0 }
+    }
+
+    pub fn fd(&self) -> BorrowedFd<'a> {
+        self.fd
     }
 
     /// Returns the next entry other than "." and "..".
